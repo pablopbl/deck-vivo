@@ -48,6 +48,13 @@ async function writeTheme(file) {
     .replace(/<a:clrScheme\b[\s\S]*?<\/a:clrScheme>/, () => scheme)
     .replace(/(<a:(?:theme|fontScheme)\b[^>]*?\bname=")[^"]*"/g, (_, h) => `${h}${THEME.name}"`);
   zip.file(part, xml);
+  // Rótulos de dados numa linha só: o PowerPoint quebra "62,0%" em duas linhas quando a coluna é estreita.
+  for (const name of Object.keys(zip.files).filter((f) => /^ppt\/charts\/chart\d+\.xml$/.test(f))) {
+    const cx = (await zip.file(name).async("string")).replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/g, (blk) =>
+      blk.replace(/<a:bodyPr(\s[^>]*)?\/>/g, (m, attrs = "") => /wrap=/.test(attrs) ? m : `<a:bodyPr${attrs} wrap="none"/>`)
+         .replace(/<a:bodyPr(\s[^>]*)?>/g, (m, attrs = "") => /wrap=/.test(attrs) || m.endsWith("/>") ? m : `<a:bodyPr${attrs} wrap="none">`));
+    zip.file(name, cx);
+  }
   for (const name of Object.keys(zip.files)) {
     if (!name.endsWith(".xml")) continue;
     const bad = (await zip.file(name).async("string")).match(/<a:srgbClr val="((?![0-9A-Fa-f]{6}")[^"]*)"/);
@@ -286,6 +293,64 @@ function createDeck(opts = {}) {
     });
   }
 
+  // Cards com gráfico no lugar do número em texto (2–3 por slide). Cada item:
+  //   { type: "columns", title, subtitle, icon, categories: [a, b], values: [va, vb], format: "pct" | "brl" | "int",
+  //     badge: { value: "2,5×", label: "mais" } }          -> duas colunas; o selo fica sobre a coluna mais baixa
+  //   { type: "donut", title, subtitle, icon, value: 0.55, display: "55,0%", centerLabel: "grupo B",
+  //     compare: [{ label: "jan", value: 0.15, display: "15,0%" }, ...] } -> anel + barrinhas de comparação
+  // Lilás = grupo de referência (primeira categoria), roxo = grupo em destaque. O card heroIndex sai em roxo sólido.
+  async function chartCards(slide, items, { y = TOP, h = BOTTOM - TOP, heroIndex = 0 } = {}) {
+    const k = items.length, cw = (CW - (k - 1) * GAP) / k;
+    const FMT = { pct: "0.0%", brl: '"R$ "#,##0', int: "#,##0" };
+    for (let i = 0; i < k; i++) {
+      const it = items[i], x = M + i * (cw + GAP), hero = i === heroIndex;
+      const fg = hero ? col.branco : col.texto, sub = hero ? col.lilas : col.cinza, accent = hero ? col.branco : col.roxo;
+      const accentHex = hero ? HEX.white : HEX.roxo;
+      card(slide, x, y, cw, h, hero ? col.roxo : col.fundo);
+      if (it.icon) await iconDot(slide, x + 0.4, y + 0.4, 0.7, it.icon, hero ? col.roxoMedio : col.roxo);
+      const hx = it.icon ? x + 1.3 : x + 0.4;
+      text(slide, [{ text: it.title, options: { fontSize: 18, bold: true, color: fg, breakLine: !!it.subtitle } }, ...(it.subtitle ? [{ text: it.subtitle, options: { fontSize: 12, color: sub } }] : [])],
+        { x: hx, y: y + 0.4, w: x + cw - 0.3 - hx, h: 0.7, valign: "middle" });
+
+      if (it.type === "donut") {
+        const d = Math.min(2.2, h - 2.25), dx = x + (cw - d) / 2, dy = y + 1.25;
+        slide.addChart(pres.charts.DOUGHNUT, [{ name: it.title, labels: ["destaque", "restante"], values: [it.value, 1 - it.value] }], {
+          x: dx, y: dy, w: d, h: d, holeSize: 68, chartColors: [accentHex, hero ? HEX.roxoMedio : HEX.lilas],
+          showLegend: false, showValue: false, showPercent: false, showLabel: false, showTitle: false, dataBorder: { pt: 0, color: hero ? HEX.roxo : HEX.lilasBg },
+          objectName: nm("grafico-anel"),
+        });
+        text(slide, [{ text: it.display, options: { fontSize: 24, bold: true, color: accent, breakLine: !!it.centerLabel } }, ...(it.centerLabel ? [{ text: it.centerLabel, options: { fontSize: 11, color: sub } }] : [])],
+          { x: dx, y: dy + d / 2 - 0.45, w: d, h: 0.9, align: "center", valign: "middle" });
+        const cmp = it.compare || [], max = Math.max(it.value, ...cmp.map((c) => c.value)), barMax = cw - 1.8;
+        cmp.forEach((c, j) => {
+          const ry = y + h - 0.3 - (cmp.length - j) * 0.36, bw = Math.max(0.08, barMax * c.value / max), last = j === cmp.length - 1;
+          text(slide, c.label, { x: x + 0.4, y: ry, w: 0.45, h: 0.26, fontSize: 12, bold: true, color: fg, valign: "middle" });
+          slide.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: x + 0.86, y: ry + 0.03, w: bw, h: 0.2, fill: { color: last ? accent : (hero ? col.roxoMedio : col.lilas) }, line: { type: "none" }, rectRadius: 0.05, objectName: nm("barra-comparacao") });
+          text(slide, c.display, { x: x + 0.96 + bw, y: ry, w: 0.9, h: 0.26, fontSize: 12, bold: true, color: accent, valign: "middle" });
+        });
+        continue;
+      }
+
+      // colunas
+      const fmt = FMT[it.format || "int"], cx = x + 0.25, cyy = y + 1.3, chw = cw - 0.5, chh = h - 1.55;
+      slide.addChart(pres.charts.BAR, [{ name: it.title, labels: it.categories, values: it.values }], {
+        x: cx, y: cyy, w: chw, h: chh, barDir: "col", barGapWidthPct: 30,
+        chartColors: [hero ? HEX.lilas : HEX.lilas, accentHex],
+        showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: fmt, dataLabelFontSize: 18, dataLabelFontBold: true, dataLabelColor: accentHex,
+        dataLabelFontFace: "+mn-lt", catAxisLabelFontFace: "+mn-lt",
+        catAxisLabelColor: hero ? HEX.white : HEX.ink, catAxisLabelFontSize: 12, catAxisLabelFontBold: true, catAxisLineShow: false,
+        valAxisHidden: true, valAxisMinVal: 0, valAxisMaxVal: Math.max(...it.values) * 1.25, valGridLine: { style: "none" }, catGridLine: { style: "none" },
+        showLegend: false, objectName: nm("grafico-colunas"),
+      });
+      if (it.badge) {
+        const low = it.values[0] <= it.values[1] ? 0 : 1, colC = low === 0 ? cx + 0.9 * chw / 3.35 : cx + chw - 0.9 * chw / 3.35, bd = 0.9;
+        slide.addShape(pres.shapes.OVAL, { x: colC - bd / 2, y: cyy - 0.1, w: bd, h: bd, fill: { color: col.magenta }, line: { type: "none" }, objectName: nm("selo") });
+        text(slide, [{ text: it.badge.value, options: { fontSize: 16, bold: true, breakLine: !!it.badge.label } }, ...(it.badge.label ? [{ text: it.badge.label, options: { fontSize: 10 } }] : [])],
+          { x: colC - bd / 2, y: cyy - 0.1, w: bd, h: bd, color: col.branco, align: "center", valign: "middle", wrap: false });
+      }
+    }
+  }
+
   async function save(file) {
     await pres.writeFile({ fileName: file });
     await writeTheme(file);
@@ -296,7 +361,7 @@ function createDeck(opts = {}) {
     pres, HEX, col, M, CW, W, GAP, TOP, BOTTOM,
     cover, content, statement, closing,
     text, card, pill, chip, legend, note, iconDot, iconData,
-    statCards, compareBars, iconCards, callout, table, heroPanel, barChart,
+    statCards, chartCards, compareBars, iconCards, callout, table, heroPanel, barChart,
     save,
   };
 }

@@ -88,6 +88,7 @@ Todas recebem o slide devolvido por `content()`. As funções com ícone são `a
 | Função | O que desenha |
 |---|---|
 | `await statCards(slide, items, {heroIndex, y, h})` | 2–4 cards de número grande (`value`, `label`, `detail`, `icon`). O card `heroIndex` (padrão 0, `-1` para nenhum) sai em roxo sólido |
+| `await chartCards(slide, items, {heroIndex, y, h})` | Variação gráfica dos `statCards` (2–3 cards). `type: "columns"`: duas colunas (`categories`, `values`, `format`: `"pct"`, `"brl"` ou `"int"`), com `badge` magenta sobre a coluna mais baixa. `type: "donut"`: anel (`value` de 0 a 1, `display`, `centerLabel`) e barrinhas de evolução em `compare: [{label, value, display}]`. A primeira categoria sai em lilás (referência) e a segunda em roxo (destaque). Prefira este formato quando o número é uma comparação. Veja o slide 3 de `exemplo.js` |
 | `compareBars(slide, rows, {badge, footnote, y, h})` | Barras horizontais com número grande ao lado; `badge: {value: "2,5×", label: "maior"}` gera o selo magenta |
 | `await iconCards(slide, items, {cols, y, h, heroIndex})` | Grade de cards com ícone, título e `text` ou `bullets`. Com altura menor que 2,2" o card fica compacto (texto ao lado do ícone) |
 | `await heroPanel(slide, {x, y, w, h, value, label, detail, icon, statementText})` | Painel roxo com número grande, para pôr ao lado de tabela ou gráfico |

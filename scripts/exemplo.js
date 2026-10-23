@@ -23,6 +23,17 @@ const vivo = require("./vivo");
     { value: "2,4 mil", label: "terceiro indicador", detail: "contexto do número", icon: "FaChartPie" },
   ]);
 
+  s = d.content({ section: "Síntese", kicker: "01 · Síntese em gráficos", title: "A mesma síntese com gráficos no lugar dos números" });
+  await d.chartCards(s, [
+    { type: "columns", title: "Taxa de conversão", subtitle: "acumulado do ano", icon: "FaTrophy",
+      categories: ["Grupo A", "Grupo B"], values: [0.25, 0.62], format: "pct", badge: { value: "2,5×", label: "mais" } },
+    { type: "columns", title: "Custo médio", subtitle: "por atendimento", icon: "FaArrowTrendDown",
+      categories: ["Grupo A", "Grupo B"], values: [4000, 2400], format: "brl", badge: { value: "−40%", label: "menor" } },
+    { type: "donut", title: "Participação", subtitle: "base atual", icon: "FaChartPie",
+      value: 0.55, display: "55,0%", centerLabel: "grupo B",
+      compare: [{ label: "jan", value: 0.15, display: "15,0%" }, { label: "jun", value: 0.55, display: "55,0%" }] },
+  ]);
+
   s = d.content({ section: "Diagnóstico", kicker: "02 · Comparação", title: "Comparação entre dois grupos com selo de destaque" });
   d.compareBars(s, [
     { label: "Grupo A", value: 25, display: "25%", sub: "100 de 400" },
